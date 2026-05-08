@@ -1,0 +1,172 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null && (request.auth.token.email_verified == true || request.auth.token.email == 'admin@gmail.com');
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin') || 
+        request.auth.token.email == 'admin@gmail.com'
+      );
+    }
+
+    function isElectionOfficer() {
+       return isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'election_officer';
+    }
+
+    function isPrivileged() {
+       return isAdmin() || isElectionOfficer();
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+
+    function isValidCandidate(data) {
+      return data.keys().hasAll(['name', 'votes', 'electionId']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
+             data.votes is number && data.votes >= 0 &&
+             data.electionId is string && data.electionId.size() > 0 && data.electionId.size() <= 128 &&
+             (data.keys().hasAll(['description']) ? (data.description is string && data.description.size() <= 500) : true) &&
+             (data.keys().hasAll(['status']) ? (data.status is string && data.status in ['Pending', 'Approved', 'Rejected']) : true) &&
+             (data.keys().hasAll(['userId']) ? (data.userId is string && data.userId.size() <= 128) : true) &&
+             (data.keys().hasAll(['manifesto']) ? (data.manifesto is string && data.manifesto.size() <= 5000) : true);
+    }
+
+    function isValidCandidateUpdate(data) {
+      return (data.keys().hasAll(['name']) ? (data.name is string && data.name.size() > 0 && data.name.size() <= 100) : true) &&
+             (data.keys().hasAll(['votes']) ? (data.votes is number && data.votes >= 0) : true) &&
+             (data.keys().hasAll(['electionId']) ? (data.electionId is string && data.electionId.size() > 0 && data.electionId.size() <= 128) : true) &&
+             (data.keys().hasAll(['description']) ? (data.description is string && data.description.size() <= 500) : true) &&
+             (data.keys().hasAll(['status']) ? (data.status is string && data.status in ['Pending', 'Approved', 'Rejected']) : true) &&
+             (data.keys().hasAll(['userId']) ? (data.userId is string && data.userId.size() <= 128) : true) &&
+             (data.keys().hasAll(['manifesto']) ? (data.manifesto is string && data.manifesto.size() <= 5000) : true);
+    }
+
+    function isValidVote(data) {
+      return data.keys().hasAll(['candidateId', 'electionId']) &&
+             data.candidateId is string && data.candidateId.size() > 0 && data.candidateId.size() <= 128 &&
+             data.electionId is string && data.electionId.size() > 0 && data.electionId.size() <= 128;
+    }
+
+    function isValidElection(data) {
+      return data.keys().hasAll(['title', 'status']) &&
+             data.title is string && data.title.size() > 0 && data.title.size() <= 100 &&
+             data.status is string && 
+             data.status in ['Not Started', 'Open', 'Closed'] &&
+             (data.keys().hasAll(['startTime']) ? (data.startTime is string && data.startTime.size() <= 100) : true) &&
+             (data.keys().hasAll(['endTime']) ? (data.endTime is string && data.endTime.size() <= 100) : true) &&
+             (data.keys().hasAll(['constituency']) ? (data.constituency is string && data.constituency.size() <= 100) : true);
+    }
+
+    function isValidBooth(data) {
+      return data.keys().hasAll(['name', 'electionId', 'officerId', 'turnout']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
+             data.electionId is string && data.electionId.size() > 0 && data.electionId.size() <= 128 &&
+             data.officerId is string && data.officerId.size() <= 128 &&
+             data.turnout is number && data.turnout >= 0 &&
+             (data.keys().hasAll(['constituency']) ? (data.constituency is string && data.constituency.size() <= 100) : true) &&
+             (data.keys().hasAll(['totalVoters']) ? (data.totalVoters is number && data.totalVoters >= 0) : true);
+    }
+
+    match /booths/{boothId} {
+      allow read: if isSignedIn();
+      allow create: if isPrivileged() && isValidId(boothId) && isValidBooth(incoming());
+      allow update: if (isPrivileged() || request.auth.uid == existing().officerId) && isValidId(boothId) && isValidBooth(incoming()) && (
+        isPrivileged() || (incoming().diff(existing()).affectedKeys().hasOnly(['turnout']) && incoming().turnout == existing().turnout + 1)
+      );
+      allow delete: if isPrivileged() && isValidId(boothId);
+    }
+
+    match /elections/{electionId} {
+      allow read: if isSignedIn();
+      allow create: if isAdmin() && isValidId(electionId) && isValidElection(incoming()) && incoming().keys().size() <= 5;
+      allow update: if isPrivileged() && isValidId(electionId) && isValidElection(incoming()) && incoming().diff(existing()).affectedKeys().hasOnly(['title', 'startTime', 'endTime', 'status', 'constituency']);
+      allow delete: if isAdmin() && isValidId(electionId);
+    }
+
+
+    match /users/{userId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && (request.auth.uid == userId || isAdmin())
+                    && (isAdmin() || (incoming().isVerified == false && incoming().role == 'voter'));
+      allow update: if isSignedIn() && (
+        isAdmin() || 
+        (request.auth.uid == userId && incoming().diff(existing()).affectedKeys().hasOnly(['constituency']))
+      );
+      allow delete: if isAdmin();
+    }
+
+    match /admins/{userId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && request.auth.token.email == 'admin@gmail.com' && request.auth.uid == userId; 
+    }
+
+    match /candidates/{candidateId} {
+      allow read: if isSignedIn();
+      
+      allow create: if isSignedIn() && 
+                    isValidId(candidateId) &&
+                    isValidCandidate(incoming()) && 
+                    incoming().votes == 0 &&
+                    exists(/databases/$(database)/documents/elections/$(incoming().electionId)) &&
+                    (
+                      isPrivileged() ||
+                      (incoming().status == 'Pending' && incoming().userId == request.auth.uid)
+                    );
+                    
+      allow update: if isSignedIn() && 
+                    isValidId(candidateId) &&
+                    isValidCandidateUpdate(incoming()) && (
+                      isPrivileged() ||
+                      (incoming().diff(existing()).affectedKeys().hasOnly(['votes']) && 
+                       incoming().votes == existing().votes + 1)
+                    );
+                    
+      allow delete: if isPrivileged() && isValidId(candidateId);
+    }
+
+    match /voter_log/{userId} {
+      // Document ID is the userId, so users can only create exactly ONE record per election (using subcollections or combined IDs like `${userId}_${electionId}`)
+      allow read: if isSignedIn() && request.auth.uid == userId.split('_')[0];
+      allow create: if isSignedIn() && request.auth.uid == userId.split('_')[0];
+    }
+
+    match /votes/{voteId} {
+      allow read: if isPrivileged();
+      
+      allow create: if isSignedIn() && 
+                    isValidVote(incoming()) && 
+                    !incoming().keys().hasAny(['userId']) && 
+                    exists(/databases/$(database)/documents/elections/$(incoming().electionId)) &&
+                    get(/databases/$(database)/documents/elections/$(incoming().electionId)).data.status == 'Open' &&
+                    (
+                      (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+                       get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isVerified == true) || 
+                      isPrivileged()
+                    ) &&
+                    (
+                      (!get(/databases/$(database)/documents/elections/$(incoming().electionId)).data.keys().hasAll(['constituency'])) ||
+                      (get(/databases/$(database)/documents/elections/$(incoming().electionId)).data.constituency == 'Global') ||
+                      (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+                       get(/databases/$(database)/documents/users/$(request.auth.uid)).data.constituency == get(/databases/$(database)/documents/elections/$(incoming().electionId)).data.constituency) ||
+                      isPrivileged()
+                    ) &&
+                    exists(/databases/$(database)/documents/candidates/$(incoming().candidateId)) &&
+                    get(/databases/$(database)/documents/candidates/$(incoming().candidateId)).data.electionId == incoming().electionId;
+                    
+      allow update, delete: if false; // Votes are permanent
+    }
+  }
+}

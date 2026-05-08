@@ -1,0 +1,6 @@
+{
+  "name": "SecureVote",
+  "description": "Secure online voting system with real-time counting and an admin dashboard.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}

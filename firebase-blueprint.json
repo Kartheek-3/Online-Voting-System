@@ -1,0 +1,63 @@
+{
+  "entities": {
+    "Candidate": {
+      "title": "Candidate",
+      "description": "Represents a candidate in the election.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "votes": { "type": "number", "description": "Total vote count." }
+      },
+      "required": ["name", "votes"]
+    },
+    "Vote": {
+      "title": "Vote",
+      "description": "Represents a user's vote.",
+      "type": "object",
+      "properties": {
+        "candidateId": { "type": "string" },
+        "timestamp": { "type": "string", "description": "Server timestamp" }
+      },
+      "required": ["candidateId"]
+    },
+    "Admin": {
+      "title": "Admin",
+      "description": "Admin users.",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" }
+      },
+      "required": ["email"]
+    },
+    "ElectionSettings": {
+      "title": "ElectionSettings",
+      "description": "Global settings for the election.",
+      "type": "object",
+      "properties": {
+        "startTime": { "type": "string" },
+        "endTime": { "type": "string" },
+        "status": { "type": "string", "enum": ["Not Started", "Open", "Closed"] }
+      },
+      "required": ["status"]
+    }
+  },
+  "firestore": {
+    "candidates/{candidateId}": {
+      "schema": "Candidate",
+      "description": "List of candidates."
+    },
+    "votes/{userId}": {
+      "schema": "Vote",
+      "description": "User votes. ID matches the user's UID to prevent double voting."
+    },
+    "admins/{userId}": {
+      "schema": "Admin",
+      "description": "List of administrators."
+    },
+    "electionSettings/config": {
+      "schema": "ElectionSettings",
+      "description": "The configuration for the entire election."
+    }
+  }
+}
