@@ -6,3 +6,7 @@ coverage/
 *.log
 .env*
 !.env.example
+backend/config/serviceAccountKey1.json
+backend/config/serviceAccountKey.json
+.env
+node_modules/
