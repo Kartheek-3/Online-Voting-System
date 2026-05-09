@@ -189,3 +189,8 @@ Kartheek Mudi
 
 📜 License
 This project is for educational purposes only.
+
+#Admin Credentials
+
+admin@gmail.com
+admin@123
